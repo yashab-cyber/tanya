@@ -1,0 +1,56 @@
+.
+├── ARCHITECTURE.md
+├── PROJECT_STRUCTURE.txt
+├── PROJECT_SUMMARY.md
+├── QUICKSTART.md
+├── README.md
+├── docker-compose.yml
+├── logs.sh
+├── start.sh
+├── stop.sh
+├── backend
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── app
+│       ├── celery_app.py
+│       ├── main.py
+│       ├── agents
+│       │   ├── ai_agents.py
+│       │   └── browser_manager.py
+│       ├── api
+│       │   └── v1
+│       ├── core
+│       │   ├── config.py
+│       │   ├── database.py
+│       │   └── redis.py
+│       ├── models
+│       │   ├── __init__.py
+│       │   ├── scan.py
+│       │   └── user.py
+│       ├── scanners
+│       │   └── scan_engine.py
+│       ├── services
+│       │   └── claude_service.py
+│       ├── tasks
+│       │   └── scan_tasks.py
+│       └── testers
+│           └── vapt_testers.py
+└── frontend
+    ├── Dockerfile
+    ├── index.html
+    ├── package.json
+    ├── postcss.config.js
+    ├── tailwind.config.js
+    ├── vite.config.js
+    └── src
+        ├── App.jsx
+        ├── index.css
+        ├── main.jsx
+        ├── api
+        │   └── client.js
+        └── pages
+            ├── Dashboard.jsx
+            ├── NewScan.jsx
+            └── ScanDetail.jsx
+
+16 directories, 38 files
