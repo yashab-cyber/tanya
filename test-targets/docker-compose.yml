@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  # SQL Injection Vulnerable App
+  sql-injection-app:
+    build: ./sql-injection-app
+    container_name: test-sql-injection
+    ports:
+      - "5001:5001"
+    networks:
+      - test-network
+    restart: unless-stopped
+
+  # XSS Vulnerable App
+  xss-app:
+    build: ./xss-app
+    container_name: test-xss
+    ports:
+      - "5002:5002"
+    networks:
+      - test-network
+    restart: unless-stopped
+
+  # Authentication Bypass & IDOR Vulnerable App
+  auth-bypass-app:
+    build: ./auth-bypass-app
+    container_name: test-auth-bypass
+    ports:
+      - "5003:5003"
+    networks:
+      - test-network
+    restart: unless-stopped
+
+networks:
+  test-network:
+    driver: bridge

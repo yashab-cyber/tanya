@@ -17,6 +17,7 @@ hiredis==2.3.2
 # Celery
 celery==5.3.6
 flower==2.0.1
+nest-asyncio==1.6.0
 
 # AI & LLM
 anthropic==0.18.1
