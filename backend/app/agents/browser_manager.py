@@ -36,23 +36,23 @@ class BrowserManager:
             )
 
             # Setup HAR recording if enabled
-            har_options = None
+            context_options = {
+                "viewport": {
+                    "width": settings.BROWSER_VIEWPORT_WIDTH,
+                    "height": settings.BROWSER_VIEWPORT_HEIGHT,
+                },
+                "user_agent": settings.BROWSER_USER_AGENT,
+                "ignore_https_errors": True,
+            }
+            
             if record_har:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 self.har_path = f"{settings.HAR_STORAGE_PATH}/scan_{timestamp}.har"
                 Path(self.har_path).parent.mkdir(parents=True, exist_ok=True)
-                har_options = {"path": self.har_path}
+                context_options["record_har_path"] = self.har_path
 
             # Create context
-            self.context = await self.browser.new_context(
-                viewport={
-                    "width": settings.BROWSER_VIEWPORT_WIDTH,
-                    "height": settings.BROWSER_VIEWPORT_HEIGHT,
-                },
-                user_agent=settings.BROWSER_USER_AGENT,
-                ignore_https_errors=True,
-                record_har=har_options,
-            )
+            self.context = await self.browser.new_context(**context_options)
 
             # Create page
             self.page = await self.context.new_page()

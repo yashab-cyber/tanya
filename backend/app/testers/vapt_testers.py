@@ -36,8 +36,12 @@ class SQLInjectionTester:
         for payload in self.payloads:
             try:
                 # Construct test URL
-                test_value = param_value + payload if param_value else payload
-                test_url = url.replace(f"{param_name}={param_value}", f"{param_name}={test_value}")
+                import urllib.parse
+                if '?' in url:
+                    # URL already has parameters
+                    test_url = f"{url}&{param_name}={urllib.parse.quote(payload)}"
+                else:
+                    test_url = f"{url}?{param_name}={urllib.parse.quote(payload)}"
 
                 # Navigate and measure response
                 import time
@@ -47,24 +51,50 @@ class SQLInjectionTester:
 
                 # Get page content
                 content = await self.browser_manager.get_page_content()
+                content_lower = content.lower()
 
-                # Check for SQL error messages
+                # Enhanced SQL error detection
                 sql_errors = [
-                    "SQL syntax",
+                    "sql syntax",
                     "mysql_fetch",
-                    "ORA-",
-                    "PostgreSQL",
-                    "SQLite",
-                    "ODBC",
-                    "Microsoft SQL",
-                    "Unclosed quotation",
+                    "ora-",
+                    "postgresql",
+                    "sqlite",
+                    "odbc",
+                    "microsoft sql",
+                    "unclosed quotation",
                     "unterminated string",
+                    "syntax error",
+                    "sqlalchemy",
+                    "database error",
+                    "query failed",
+                    "mysql error",
+                    "pg_query",
+                    "warning: mysql",
+                    "valid mysql result",
+                    "mysqlclient",
+                    "sqlstate",
                 ]
 
-                error_found = any(error.lower() in content.lower() for error in sql_errors)
+                error_found = any(error in content_lower for error in sql_errors)
+
+                # Check for successful bypass indicators
+                success_indicators = [
+                    "welcome",
+                    "logged in",
+                    "login successful",
+                    "dashboard",
+                    "admin panel",
+                    "user profile",
+                ]
+                
+                bypass_success = any(indicator in content_lower for indicator in success_indicators)
 
                 # Time-based detection
-                time_based = response_time > 5 and "SLEEP" in payload or "WAITFOR" in payload
+                time_based = response_time > 5 and ("SLEEP" in payload or "WAITFOR" in payload)
+
+                # Check if we got different content than normal (boolean-based)
+                boolean_based = "1=1" in payload or "1'='1" in payload
 
                 result = {
                     "url": test_url,
@@ -73,14 +103,16 @@ class SQLInjectionTester:
                     "status_code": nav_result.get("status"),
                     "response_time": response_time,
                     "error_detected": error_found,
+                    "bypass_success": bypass_success,
                     "time_based_detected": time_based,
-                    "vulnerable": error_found or time_based,
+                    "vulnerable": error_found or bypass_success or time_based,
+                    "vulnerability_type": "error-based" if error_found else ("bypass" if bypass_success else ("time-based" if time_based else "none"))
                 }
 
                 results.append(result)
 
                 if result["vulnerable"]:
-                    logger.warning(f"Potential SQLi vulnerability found: {param_name} with payload: {payload}")
+                    logger.warning(f"SQLi vulnerability found: {param_name} with payload: {payload} (type: {result['vulnerability_type']})")
 
             except Exception as e:
                 logger.error(f"Error testing SQL injection for {param_name}: {e}")
@@ -115,33 +147,65 @@ class XSSTester:
         for payload in self.payloads:
             try:
                 # Construct test URL
-                test_url = url.replace(f"{param_name}=", f"{param_name}={payload}")
+                import urllib.parse
+                encoded_payload = urllib.parse.quote(payload)
+                
+                if '?' in url:
+                    test_url = f"{url}&{param_name}={encoded_payload}"
+                else:
+                    test_url = f"{url}?{param_name}={encoded_payload}"
 
                 # Navigate
                 await self.browser_manager.navigate(test_url)
+                await asyncio.sleep(0.2)  # Wait for page to load
 
-                # Check if payload is reflected in page
+                # Get page content
                 content = await self.browser_manager.get_page_content()
                 
-                # Check for reflected payload
-                payload_reflected = payload in content or payload.replace("'", '"') in content
+                # Check for reflected payload (both encoded and decoded)
+                payload_reflected = (
+                    payload in content or 
+                    encoded_payload in content or
+                    payload.replace("'", '"') in content or
+                    payload.replace('"', "'") in content
+                )
 
-                # Check for alert execution (in headless mode, we check for script tags)
-                script_executed = "<script>" in content or "onerror=" in content
+                # Check for script tags or event handlers in content
+                xss_indicators = [
+                    "<script>",
+                    "onerror=",
+                    "onload=",
+                    "onfocus=",
+                    "onstart=",
+                    "javascript:",
+                    "<svg",
+                    "<iframe",
+                ]
+                
+                script_detected = any(indicator.lower() in content.lower() for indicator in xss_indicators)
+
+                # Check if payload appears unescaped
+                unescaped_payload = (
+                    f">{payload}<" in content or
+                    f'"{payload}"' in content or
+                    f"'{payload}'" in content or
+                    payload in content
+                )
 
                 result = {
                     "url": test_url,
                     "parameter": param_name,
                     "payload": payload,
                     "payload_reflected": payload_reflected,
-                    "script_detected": script_executed,
-                    "vulnerable": payload_reflected or script_executed,
+                    "script_detected": script_detected,
+                    "unescaped": unescaped_payload,
+                    "vulnerable": (payload_reflected and script_detected) or unescaped_payload,
                 }
 
                 results.append(result)
 
                 if result["vulnerable"]:
-                    logger.warning(f"Potential XSS vulnerability found: {param_name} with payload: {payload}")
+                    logger.warning(f"XSS vulnerability found: {param_name} with payload: {payload}")
 
             except Exception as e:
                 logger.error(f"Error testing XSS for {param_name}: {e}")
@@ -246,28 +310,42 @@ class IDORTester:
         """Test endpoints for IDOR"""
         results = []
 
-        # Look for URLs with numeric IDs
+        # Look for URLs with numeric IDs or id parameters
         import re
-        id_pattern = re.compile(r'/(\d+)/?$')
-
+        
+        # Pattern for /id/ or /123/ in URL path
+        id_pattern = re.compile(r'/(\d+)/?(?:\?|$)')
+        # Pattern for ?id=123 or &id=123
+        param_pattern = re.compile(r'[?&]id=(\d+)')
+        
         for url in urls:
+            # Test path-based IDs
             match = id_pattern.search(url)
             if match:
                 original_id = match.group(1)
                 test_ids = [
                     str(int(original_id) + 1),
-                    str(int(original_id) - 1),
+                    str(int(original_id) - 1) if int(original_id) > 1 else "999",
                     "1",
-                    "999999",
+                    "2",
+                    "3",
                 ]
 
                 for test_id in test_ids:
                     try:
                         test_url = url.replace(f"/{original_id}", f"/{test_id}")
                         nav_result = await self.browser_manager.navigate(test_url)
+                        await asyncio.sleep(0.1)
 
+                        # Get content to check if we can access other user's data
+                        content = await self.browser_manager.get_page_content()
+                        
                         # If we get a 200 response for someone else's ID, potential IDOR
                         accessible = nav_result.get("status") == 200
+                        
+                        # Check for user data indicators
+                        data_indicators = ["email", "profile", "user", "name", "secret"]
+                        contains_data = any(indicator in content.lower() for indicator in data_indicators)
 
                         result = {
                             "original_url": url,
@@ -275,17 +353,57 @@ class IDORTester:
                             "original_id": original_id,
                             "test_id": test_id,
                             "accessible": accessible,
+                            "contains_user_data": contains_data,
                             "status_code": nav_result.get("status"),
-                            "vulnerable": accessible and test_id != original_id,
+                            "vulnerable": accessible and test_id != original_id and contains_data,
+                            "test_type": "path_based"
                         }
 
                         results.append(result)
 
                         if result["vulnerable"]:
-                            logger.warning(f"Potential IDOR vulnerability: {test_url}")
+                            logger.warning(f"IDOR vulnerability found: {test_url} - can access ID {test_id}")
 
                     except Exception as e:
                         logger.error(f"Error testing IDOR for {url}: {e}")
+            
+            # Test parameter-based IDs
+            param_match = param_pattern.search(url)
+            if param_match:
+                original_id = param_match.group(1)
+                test_ids = ["1", "2", "3", str(int(original_id) + 1)]
+                
+                for test_id in test_ids:
+                    try:
+                        test_url = re.sub(r'id=\d+', f'id={test_id}', url)
+                        nav_result = await self.browser_manager.navigate(test_url)
+                        await asyncio.sleep(0.1)
+                        
+                        content = await self.browser_manager.get_page_content()
+                        accessible = nav_result.get("status") == 200
+                        
+                        data_indicators = ["email", "profile", "user", "name", "secret"]
+                        contains_data = any(indicator in content.lower() for indicator in data_indicators)
+                        
+                        result = {
+                            "original_url": url,
+                            "test_url": test_url,
+                            "original_id": original_id,
+                            "test_id": test_id,
+                            "accessible": accessible,
+                            "contains_user_data": contains_data,
+                            "status_code": nav_result.get("status"),
+                            "vulnerable": accessible and test_id != original_id and contains_data,
+                            "test_type": "parameter_based"
+                        }
+                        
+                        results.append(result)
+                        
+                        if result["vulnerable"]:
+                            logger.warning(f"IDOR vulnerability found: {test_url} - can access user {test_id}'s data")
+                    
+                    except Exception as e:
+                        logger.error(f"Error testing IDOR parameter for {url}: {e}")
 
         return results
 
@@ -314,40 +432,85 @@ class VAPTTestOrchestrator:
                 "idor": [],
             }
 
-            # Test SQL Injection
+            urls = scan_data.get("urls", [])
+            target_url = scan_data.get("target_url", "")
+
+            # Test SQL Injection on discovered URLs and forms
             logger.info("Testing for SQL Injection...")
-            for param in scan_data.get("unique_parameters", [])[:10]:  # Test first 10 params
-                for url in scan_data.get("urls", [])[:5]:  # Test first 5 URLs
-                    if param in url:
+            
+            # Test common parameter names
+            common_params = ["username", "password", "email", "id", "search", "q", "query", "name", "user"]
+            
+            for url in urls[:10]:  # Test first 10 URLs
+                for param in common_params:
+                    sqli_results = await self.sqli_tester.test_parameter(url, param)
+                    all_results["sql_injection"].extend(sqli_results)
+                    await asyncio.sleep(0.1)  # Rate limiting
+            
+            # Test discovered parameters
+            for param in scan_data.get("unique_parameters", [])[:10]:
+                for url in urls[:5]:
+                    if "?" in url or "=" in url:
                         sqli_results = await self.sqli_tester.test_parameter(url, param)
                         all_results["sql_injection"].extend(sqli_results)
 
             # Test XSS
             logger.info("Testing for XSS...")
+            
+            # Test common parameters for XSS
+            xss_params = ["msg", "message", "comment", "text", "search", "q", "query", "name"]
+            
+            for url in urls[:10]:
+                for param in xss_params:
+                    xss_results = await self.xss_tester.test_parameter(url, param)
+                    all_results["xss"].extend(xss_results)
+                    await asyncio.sleep(0.1)
+
+            # Test discovered parameters
             for param in scan_data.get("unique_parameters", [])[:10]:
-                for url in scan_data.get("urls", [])[:5]:
-                    if param in url:
-                        xss_results = await self.xss_tester.test_parameter(url, param)
-                        all_results["xss"].extend(xss_results)
+                for url in urls[:5]:
+                    xss_results = await self.xss_tester.test_parameter(url, param)
+                    all_results["xss"].extend(xss_results)
 
             # Test CSRF
             logger.info("Testing for CSRF...")
             forms = scan_data.get("forms", [])
-            csrf_results = await self.csrf_tester.test_forms(forms)
-            all_results["csrf"] = csrf_results
+            if forms:
+                csrf_results = await self.csrf_tester.test_forms(forms)
+                all_results["csrf"] = csrf_results
 
             # Test Authentication Bypass
             logger.info("Testing for Authentication Bypass...")
-            if scan_data.get("has_authentication"):
-                target_url = scan_data.get("target_url")
+            # Look for login endpoints
+            login_urls = [
+                url for url in urls 
+                if any(keyword in url.lower() for keyword in ["login", "signin", "auth"])
+            ]
+            
+            if login_urls:
+                for login_url in login_urls[:3]:  # Test first 3 login URLs
+                    auth_results = await self.auth_tester.test_login(login_url)
+                    all_results["authentication_bypass"].extend(auth_results)
+            elif target_url:
+                # Try the base URL
                 auth_results = await self.auth_tester.test_login(target_url)
-                all_results["authentication_bypass"] = auth_results
+                all_results["authentication_bypass"].extend(auth_results)
 
             # Test IDOR
             logger.info("Testing for IDOR...")
-            urls = scan_data.get("urls", [])[:20]  # Test first 20 URLs
-            idor_results = await self.idor_tester.test_endpoints(urls)
-            all_results["idor"] = idor_results
+            # Look for URLs with IDs or profile/user endpoints
+            idor_candidate_urls = [
+                url for url in urls
+                if any(keyword in url.lower() for keyword in ["profile", "user", "api", "id=", "/1", "/2", "/3"])
+            ]
+            
+            if idor_candidate_urls:
+                idor_results = await self.idor_tester.test_endpoints(idor_candidate_urls[:20])
+                all_results["idor"] = idor_results
+            else:
+                # Test all URLs for potential IDOR
+                idor_results = await self.idor_tester.test_endpoints(urls[:20])
+                all_results["idor"] = idor_results
 
             # Calculate summary
             total_vulnerabilities = sum(
@@ -366,6 +529,7 @@ class VAPTTestOrchestrator:
             }
 
             logger.info(f"VAPT testing completed. Found {total_vulnerabilities} vulnerabilities")
+            logger.info(f"Summary: {summary}")
 
             return {
                 "success": True,
@@ -374,5 +538,5 @@ class VAPTTestOrchestrator:
             }
 
         except Exception as e:
-            logger.error(f"Error during VAPT testing: {e}")
+            logger.error(f"Error during VAPT testing: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
