@@ -19,6 +19,7 @@ def run_full_scan(self, scan_id: int, target_url: str, username: str = None, pas
     
     async def _run_scan():
         db = AsyncSessionLocal()
+        scan = None
         try:
             # Update scan status
             result = await db.execute(select(Scan).where(Scan.id == scan_id))

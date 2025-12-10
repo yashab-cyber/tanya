@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     BROWSER_VIEWPORT_WIDTH: int = 1280
     BROWSER_VIEWPORT_HEIGHT: int = 800
     BROWSER_TIMEOUT: int = 30000
+    BROWSER_NAVIGATION_TIMEOUT: int = 60000
+    BROWSER_USER_AGENT: str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    BROWSER_ACCEPT_DOWNLOADS: bool = True
+    BROWSER_RECORD_HAR: bool = True
+    BROWSER_RECORD_VIDEO: bool = False
+    BROWSER_IGNORE_HTTPS_ERRORS: bool = True
 
     # Display
     DISPLAY_NUMBER: int = 1
